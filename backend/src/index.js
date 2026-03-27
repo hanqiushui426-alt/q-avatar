@@ -37,21 +37,12 @@ const upload = multer({
 // 模拟任务存储（生产环境用Redis）
 const tasks = new Map()
 
-// AI API 配置（硅基流动）
-const AI_API_KEY = process.env.AI_API_KEY || ''
-const AI_API_URL = 'https://api.siliconflow.cn/v1'
+// AI API 配置（火山引擎 Doubao Seedream 4.0）
+const AI_API_KEY = '37da519c-8e1a-4c7c-9e90-f08ec59a78d1'
+const AI_API_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 
-// 表情包提示词模板
-const EXPRESSION_PROMPTS = [
-  'happy smile, cute Q version cartoon',
-  'sad crying, cute Q version cartoon',
-  'surprised amazed, cute Q version cartoon',
-  'angry furious, cute Q version cartoon',
-  'thinking pensive, cute Q version cartoon',
-  'playful mischievous, cute Q version cartoon',
-  'sleepy tired, cute Q version cartoon',
-  'love adore, cute Q version cartoon',
-]
+// 表情包提示词（3x3 网格，9 个表情）
+const EXPRESSION_PROMPT = `Based on the reference image character, create a brand new set of Q-version half-body emoticons. Style should imitate LINE stickers, with cute colorful hand-drawn texture. Must accurately reproduce the character's iconic headwear. Layout: 3x3 grid matrix (9 emoticons). Each expression's action and expression must be redesigned, not directly copied from the original. Content covers daily online chat common phrases (no memes). All text labels must be handwritten simplified Chinese. 4K resolution, 1:1 aspect ratio.`
 
 // 上传图片
 app.post('/api/upload', upload.single('image'), async (req, res) => {
@@ -77,13 +68,13 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
   }
 })
 
-// 发起生成任务
+// 发起生成任务（生成 3x3 网格表情包，9 个表情）
 app.post('/api/generate', async (req, res) => {
   try {
-    const { file_id, count = 8 } = req.body
+    const { file_id, base64 } = req.body
     
-    if (!file_id) {
-      return res.status(400).json({ error: 'file_id required' })
+    if (!file_id || !base64) {
+      return res.status(400).json({ error: 'file_id and base64 required' })
     }
 
     const task_id = uuidv4()
@@ -97,7 +88,7 @@ app.post('/api/generate', async (req, res) => {
     })
 
     // 异步生成（生产环境用队列）
-    generateImages(task_id, file_id, count)
+    generateImages(task_id, file_id, base64)
     
     res.json({ task_id })
   } catch (err) {
@@ -159,50 +150,47 @@ app.post('/api/download', async (req, res) => {
   }
 })
 
-// AI生成图片（模拟/实际调用）
-async function generateImages(taskId, fileId, count) {
+// AI生成图片（一次生成 9 个表情的 3x3 网格图）
+async function generateImages(taskId, fileId, base64Image) {
   const task = tasks.get(taskId)
   
   try {
-    // 模拟生成过程
-    for (let i = 0; i < count; i++) {
-      task.progress = ((i + 1) / count) * 100
-      task.message = `正在生成第 ${i + 1}/${count} 张...`
-      tasks.set(taskId, { ...task })
-      
-      // 模拟生成延迟
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      
-      // 这里实际应该调用AI API
-      // const result = await callAIApi(fileId, EXPRESSION_PROMPTS[i])
-      
-      // 暂时使用占位图
-      task.results.push(`/uploads/${fileId}.jpg`) // 实际会替换为AI生成的图
-    }
+    // 更新任务状态
+    task.progress = 10
+    task.message = '正在生成 3x3 网格表情包（9 个表情）...'
+    tasks.set(taskId, { ...task })
     
+    // 调用 AI API 生成 1 张包含 9 个表情的网格图
+    const result = await callAIApi(base64Image, EXPRESSION_PROMPT)
+    
+    task.progress = 100
+    task.results.push(result)
     task.status = 'completed'
-    task.message = '生成完成!'
+    task.message = '生成完成！'
     tasks.set(taskId, task)
     
   } catch (err) {
     task.status = 'failed'
-    task.message = '生成失败'
+    task.message = '生成失败：' + err.message
     tasks.set(taskId, task)
   }
 }
 
-// AI API 调用（实际实现）
-async function callAIApi(imagePath, prompt) {
-  // 硅基流动 API 调用示例
-  // 需要先上传图片获取URL，然后调用SD生成
+// AI API 调用（火山引擎 Doubao Seedream 4.0）
+async function callAIApi(base64Image, prompt) {
+  // 火山引擎 Doubao Seedream 4.0 API 调用
+  // 一次生成 1 张包含 9 个表情的 3x3 网格图
   
   const response = await axios.post(
-    `${AI_API_URL}/v1/images/generations`,
+    `${AI_API_URL}/images/generation`,
     {
-      model: 'stabilityai/stable-diffusion-xl-base-1.0',
+      model: 'doubao-seedream-4.0',
       prompt: prompt,
-      negative_prompt: 'ugly, blurry, low quality',
-      image_count: 1,
+      negative_prompt: 'ugly, blurry, low quality, watermark, signature',
+      num_images: 1,
+      width: 1024,  // 4K 分辨率宽度
+      height: 1024, // 4K 分辨率高度 (1:1 宽高比）
+      image: base64Image, // 使用 base64 图片
     },
     {
       headers: {

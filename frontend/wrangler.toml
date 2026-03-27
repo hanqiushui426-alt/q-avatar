@@ -1,0 +1,11 @@
+name = "q-avatar"
+compatibility_date = "2024-01-01"
+pages_build_output_dir = ".vercel/output/static"
+
+[vars]
+AI_API_KEY = "37da519c-8e1a-4c7c-9e90-f08ec59a78d1"
+AI_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+AI_MODEL = "doubao-seedream-4-0-250828"
+
+[env.production]
+compatibility_flags = ["nodejs_compat"]

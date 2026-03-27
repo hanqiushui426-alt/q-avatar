@@ -1,10 +1,5 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
-import path from 'path'
-import { v4 as uuidv4 } from 'uuid'
-
-// 存储上传文件的目录
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads')
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,24 +10,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 })
     }
 
-    // 确保上传目录存在
-    await mkdir(UPLOAD_DIR, { recursive: true })
+    // 生成唯一 ID
+    const fileId = crypto.randomUUID()
+    const mimeType = file.type || 'image/jpeg'
 
-    // 生成唯一文件名
-    const fileId = uuidv4()
-    const ext = file.name.split('.').pop() || 'jpg'
-    const filename = `${fileId}.${ext}`
-    const filepath = path.join(UPLOAD_DIR, filename)
+    // 转换为 Base64
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result as string
+        // 移除 data:xxx;base64, 前缀
+        const base64Data = result.split(',')[1]
+        resolve(base64Data)
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
 
-    // 写入文件
-    const buffer = Buffer.from(await file.arrayBuffer())
-    await writeFile(filepath, buffer)
-
-    // 返回文件信息
+    // 返回 Base64
     return NextResponse.json({
       file_id: fileId,
-      url: `/uploads/${filename}`,
-      filename,
+      base64: `data:${mimeType};base64,${base64}`,
+      mimeType,
     })
   } catch (err) {
     console.error('Upload error:', err)

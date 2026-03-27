@@ -1,123 +1,94 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { tasks } from '@/lib/tasks'
 
 // AI 配置
 const AI_API_KEY = process.env.AI_API_KEY
-const AI_BASE_URL = process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/coding/v3'
-const AI_MODEL = process.env.AI_MODEL || 'ark-code-latest'
+const AI_BASE_URL = process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'
+const AI_MODEL = process.env.AI_MODEL || 'doubao-seedream-4-0-250828'
 
-// 表情包提示词模板
-const EXPRESSION_PROMPTS = [
-  'happy smile, cute Q version cartoon avatar, big head small body, anime style',
-  'sad crying, cute Q version cartoon avatar, big head small body, anime style',
-  'surprised amazed, cute Q version cartoon avatar, big head small body, anime style',
-  'angry furious, cute Q version cartoon avatar, big head small body, anime style',
-  'thinking pensive, cute Q version cartoon avatar, big head small body, anime style',
-  'playful mischievous, cute Q version cartoon avatar, big head small body, anime style',
-  'sleepy tired, cute Q version cartoon avatar, big head small body, anime style',
-  'love adore, cute Q version cartoon avatar, big head small body, anime style',
-]
+// 3x3 网格表情包提示词（9 个表情）
+const EXPRESSION_PROMPT = `Based on the reference image character, create a brand new set of Q-version half-body emoticons. Style should imitate LINE stickers, with cute colorful hand-drawn texture. Must accurately reproduce the character's iconic headwear. Layout: 3x3 grid matrix (9 emoticons). Each expression's action and expression must be redesigned, not directly copied from the original. Content covers daily online chat common phrases (no memes). All text labels must be handwritten simplified Chinese. 4K resolution, 1:11 aspect ratio.`
 
 export async function POST(request: NextRequest) {
   try {
-    const { file_id, count = 8, prompt } = await request.json()
+    const { file_id, base64 } = await request.json()
 
-    if (!file_id) {
-      return NextResponse.json({ error: 'file_id required' }, { status: 400 })
+    if (!file_id || !base64) {
+      return NextResponse.json({ error: 'file_id and base64 required' }, { status: 400 })
     }
 
     const task_id = uuidv4()
 
-    // 初始化任务
-    tasks.set(task_id, {
-      status: 'processing',
-      progress: 0,
-      results: [],
-      message: '准备生成...',
+    // 一次 API 调用生成 3x3 网格图
+    const result = await callAIApi(base64, EXPRESSION_PROMPT)
+
+    return NextResponse.json({ 
+      task_id,
+      status: 'completed',
+      progress: 100,
+      results: [result], // 返回 1 张网格图的 URL
+      message: '生成完成!'
     })
-
-    // 异步生成
-    generateImages(task_id, file_id, count, prompt || EXPRESSION_PROMPTS)
-
-    return NextResponse.json({ task_id })
   } catch (err) {
     console.error('Generate error:', err)
     return NextResponse.json({ error: 'Generate failed' }, { status: 500 })
   }
 }
 
-// AI生成图片
-async function generateImages(taskId: string, fileId: string, count: number, prompts: string[]) {
-  const task = tasks.get(taskId)
+// AI API 调用（火山引擎 Doubao Seedream 4.0）
+async function callAIApi(base64Image: string, prompt: string): Promise<string> {
+  if (!AI_API_KEY) {
+    // 开发环境返回占位图
+    return 'https://placehold.co/1024x1024/ff9900/white?text=3x3+Grid+Demo'
+  }
 
   try {
-    for (let i = 0; i < count; i++) {
-      task.progress = ((i + 1) / count) * 100
-      task.message = `正在生成第 ${i + 1}/${count} 张...`
-      tasks.set(taskId, { ...task })
-
-      try {
-        // 调用 AI API 生成图片
-        const imageUrl = await callAIApi(prompts[i], fileId)
-        task.results.push(imageUrl)
-      } catch (e) {
-        console.error(`Failed to generate image ${i}:`, e)
-        // 如果 API 调用失败，使用占位图
-        task.results.push(`/uploads/${fileId}.jpg`)
-      }
-
-      tasks.set(taskId, { ...task })
+    // 解析 base64，提取纯 base64 数据（不含 data:xxx;base64, 前缀）
+    let imageData = base64Image
+    if (base64Image.includes(',')) {
+      imageData = base64Image.split(',')[1]
     }
 
-    task.status = 'completed'
-    task.message = '生成完成!'
-    tasks.set(taskId, task)
+    // 使用火山引擎 API
+    const response = await fetch(`${AI_BASE_URL}/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${AI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        prompt: prompt,
+        n: 1,
+        size: '1024x1024',
+        response_format: 'url',
+        watermark: true,
+        // 传递纯 base64 数据，不带前缀
+        image: `data:image/jpeg;base64,${imageData}`,
+      }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error('AI API error:', error)
+      throw new Error(`AI API error: ${error}`)
+    }
+
+    const data = await response.json()
+    
+    // 检查返回格式
+    if (data.data && data[0] && data[0].url) {
+      return data[0].url
+    }
+    
+    if (data.data && data.data[0] && data.data[0].url) {
+      return data.data[0].url
+    }
+
+    throw new Error('Invalid response from AI API')
   } catch (err) {
-    console.error('Generate error:', err)
-    task.status = 'failed'
-    task.message = '生成失败'
-    tasks.set(taskId, task)
+    console.error('AI API 调用失败:', err)
+    throw err
   }
-}
-
-// AI API 调用
-async function callAIApi(prompt: string, fileId: string): Promise<string> {
-  if (!AI_API_KEY) {
-    throw new Error('AI_API_KEY not configured')
-  }
-
-  // 使用火山引擎 API（兼容 OpenAI 格式）
-  const response = await fetch(`${AI_BASE_URL}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${AI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      prompt: prompt,
-      n: 1,
-      size: '1024x1024',
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`AI API error: ${error}`)
-  }
-
-  const data = await response.json()
-  
-  // 检查返回格式
-  if (data.data && data.data[0] && data.data[0].url) {
-    return data.data[0].url
-  }
-  
-  if (data.data && data.data[0] && data.data[0].b64_json) {
-    // 如果返回 base64，需要保存为文件
-    return `data:image/png;base64,${data.data[0].b64_json}`
-  }
-
-  throw new Error('Invalid response from AI API')
 }

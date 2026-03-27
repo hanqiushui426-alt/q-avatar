@@ -1,19 +1,22 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { useDropzone } from 'react-dropzone'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Image from 'next/image'
 
-// 表情类型
+// 声明浏览器全局类型
+declare const document: typeof window.document
+
+// 3x3 网格表情类型（9 个表情）
 const EXPRESSIONS = [
-  { id: 1, name: '开心', emoji: '😀', prompt: 'happy smile, cute Q version cartoon, big head small body' },
-  { id: 2, name: '悲伤', emoji: '😢', prompt: 'sad crying, cute Q version cartoon, big head small body' },
-  { id: 3, name: '惊讶', emoji: '😮', prompt: 'surprised amazed, cute Q version cartoon, big head small body' },
-  { id: 4, name: '生气', emoji: '😠', prompt: 'angry furious, cute Q version cartoon, big head small body' },
-  { id: 5, name: '思考', emoji: '🤔', prompt: 'thinking pensive, cute Q version cartoon, big head small body' },
-  { id: 6, name: '搞怪', emoji: '😜', prompt: 'playful mischievous, cute Q version cartoon, big head small body' },
-  { id: 7, name: '发呆', emoji: '😴', prompt: 'sleepy tired, cute Q version cartoon, big head small body' },
-  { id: 8, name: '卖萌', emoji: '🤗', prompt: 'love adore, cute Q version cartoon, big head small body' },
+  { id: 1, name: '开心', emoji: '😀', row: 0, col: 0 },
+  { id: 2, name: '悲伤', emoji: '😢', row: 0, col: 1 },
+  { id: 3, name: '惊讶', emoji: '😮', row: 0, col: 2 },
+  { id: 4, name: '生气', emoji: '😠', row: 1, col: 0 },
+  { id: 5, name: '思考', emoji: '🤔', row: 1, col: 1 },
+  { id: 6, name: '搞怪', emoji: '😜', row: 1, col: 2 },
+  { id: 7, name: '发呆', emoji: '😴', row: 2, col: 0 },
+  { id: 8, name: '卖萌', emoji: '🤗', row: 2, col: 1 },
+  { id: 9, name: '害羞', emoji: '😊', row: 2, col: 2 },
 ]
 
 type Step = 'upload' | 'preview' | 'generating' | 'result'
@@ -22,16 +25,73 @@ export default function Home() {
   const [step, setStep] = useState<Step>('upload')
   const [image, setImage] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [base64Image, setBase64Image] = useState<string>('')
   const [taskId, setTaskId] = useState<string>('')
-  const [results, setResults] = useState<string[]>([])
+  const [gridImageUrl, setGridImageUrl] = useState<string>('')
   const [selected, setSelected] = useState<number[]>([])
   const [progress, setProgress] = useState(0)
   const [generatingText, setGeneratingText] = useState('')
   const [selectedImage, setSelectedImage] = useState<number | null>(null)
+  const [splitImages, setSplitImages] = useState<string[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // 处理图片上传
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0]
+  // 将文件转换为 Base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
+  // 分割 3x3 网格图为 9 张独立图
+  const splitGridImage = async (imageUrl: string): Promise<string[]> => {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        
+        if (!ctx) {
+          reject(new Error('Canvas context not available'))
+          return
+        }
+
+        const gridSize = 3
+        const cellWidth = img.width / gridSize
+        const cellHeight = img.height / gridSize
+        const splitUrls: string[] = []
+
+        for (let row = 0; row < gridSize; row++) {
+          for (let col = 0; col < gridSize; col++) {
+            canvas.width = cellWidth
+            canvas.height = cellHeight
+            
+            // 绘制网格的一部分
+            ctx.drawImage(
+              img,
+              col * cellWidth, row * cellHeight, cellWidth, cellHeight, // 源位置和大小
+              0, 0, cellWidth, cellHeight // 目标位置和大小
+            )
+
+            // 转换为 base64
+            const dataUrl = canvas.toDataURL('image/png')
+            splitUrls.push(dataUrl)
+          }
+        }
+
+        resolve(splitUrls)
+      }
+      img.onerror = reject
+      img.src = imageUrl
+    })
+  }
+
+  // 处理图片选择
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
     if (!file) return
 
     if (file.size > 10 * 1024 * 1024) {
@@ -39,80 +99,63 @@ export default function Home() {
       return
     }
 
+    // 预览
+    const url = URL.createObjectURL(file)
     setImage(file)
-    setPreviewUrl(URL.createObjectURL(file))
-    setStep('preview')
-  }, [])
+    setPreviewUrl(url)
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: { 'image/*': ['.jpg', '.jpeg', '.png'] },
-    maxFiles: 1,
-  })
+    // 转换为 Base64
+    const base64 = await fileToBase64(file)
+    setBase64Image(base64)
+
+    setStep('preview')
+  }
+
+  // 点击上传区域
+  const handleClick = () => {
+    fileInputRef.current?.click()
+  }
 
   // 开始生成
   const handleGenerate = async () => {
-    if (!image) return
+    if (!image || !base64Image) return
 
     setStep('generating')
     setProgress(0)
-    setGeneratingText('正在上传图片...')
+    setGeneratingText('正在生成 3x3 网格表情包（9 个表情）...')
 
     try {
-      // 1. 上传图片
-      const formData = new FormData()
-      formData.append('image', image)
-
-      const uploadRes = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      })
-      const uploadData = await uploadRes.json()
-
-      if (!uploadData.file_id) {
-        throw new Error('Upload failed')
-      }
-
-      setProgress(10)
-      setGeneratingText('AI正在生成表情包...')
-
-      // 2. 发起生成任务
+      // 使用 Base64 发起生成任务（不再需要 count 参数）
       const generateRes = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          file_id: uploadData.file_id,
-          count: 8,
+          file_id: crypto.randomUUID(),
+          base64: base64Image,
         }),
       })
+      
       const generateData = await generateRes.json()
-      const newTaskId = generateData.task_id
-      setTaskId(newTaskId)
-
-      setProgress(20)
-
-      // 3. 轮询任务状态
-      const pollTask = async () => {
-        const statusRes = await fetch(`/api/task/${newTaskId}`)
-        const statusData = await statusRes.json()
-
-        const prog = Math.min(20 + statusData.progress * 0.7, 90)
-        setProgress(prog)
-
-        if (statusData.status === 'completed') {
-          setResults(statusData.results)
-          setSelected(statusData.results.map((_: unknown, i: number) => i))
-          setStep('result')
-        } else if (statusData.status === 'failed') {
-          alert('生成失败，请重试')
-          setStep('upload')
-        } else {
-          setGeneratingText(statusData.message || 'AI正在生成表情包...')
-          setTimeout(pollTask, 2000)
-        }
+      
+      if (generateData.error) {
+        throw new Error(generateData.error)
       }
 
-      setTimeout(pollTask, 1000)
+      setProgress(100)
+      setGeneratingText('正在分割网格图...')
+
+      if (generateData.results && generateData.results.length > 0) {
+        const gridUrl = generateData.results[0]
+        setGridImageUrl(gridUrl)
+        
+        // 分割网格图
+        const splits = await splitGridImage(gridUrl)
+        setSplitImages(splits)
+        setSelected(splits.map((_: string, i: number) => i))
+        setStep('result')
+      } else {
+        throw new Error('生成结果为空')
+      }
     } catch (err) {
       console.error(err)
       alert('出错了，请重试')
@@ -131,17 +174,22 @@ export default function Home() {
 
   // 全选/取消全选
   const toggleAll = () => {
-    if (selected.length === results.length) {
+    if (selected.length === splitImages.length) {
       setSelected([])
     } else {
-      setSelected(results.map((_, i) => i))
+      setSelected(splitImages.map((_: string, i: number) => i))
     }
   }
 
   // 下载单张
   const handleDownload = async (url: string, filename: string) => {
     try {
-      const res = await fetch(url)
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      
       const blob = await res.blob()
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
@@ -152,30 +200,36 @@ export default function Home() {
     }
   }
 
-  // 打包下载
+  // 下载全部（ZIP 打包）
   const handleDownloadAll = async () => {
+    const selectedUrls = selected.map(i => splitImages[i])
+    
     try {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          urls: selected.map(i => results[i]),
-        }),
+        body: JSON.stringify({ urls: selectedUrls }),
       })
+      
       const blob = await res.blob()
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
       link.download = 'q-avatar.zip'
       link.click()
     } catch (err) {
-      alert('下载失败')
+      console.error('Download all failed:', err)
+      alert('下载失败，请重试')
     }
   }
 
   // 复制到剪贴板
   const handleCopyToClipboard = async (url: string) => {
     try {
-      const res = await fetch(url)
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
       const blob = await res.blob()
       await navigator.clipboard.write([
         new ClipboardItem({ [blob.type]: blob })
@@ -192,49 +246,43 @@ export default function Home() {
     setStep('upload')
     setImage(null)
     setPreviewUrl('')
+    setBase64Image('')
     setTaskId('')
-    setResults([])
+    setGridImageUrl('')
+    setSplitImages([])
     setSelected([])
     setProgress(0)
     setGeneratingText('')
   }
 
   return (
-    <main className="min-h-screen py-8 px-4">
+    <main className="min-h-screen py-8 px-4 bg-gradient-to-br from-yellow-400 to-orange-500">
       <div className="max-w-md mx-auto">
         {/* 标题 */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2 text-shadow">
+          <h1 className="text-4xl font-bold text-white mb-2 drop-shadow-lg">
             🐣 Q趣头像
           </h1>
-          <p className="text-white/80">AI生成你的专属Q版表情包</p>
+          <p className="text-white/90">AI生成你的专属Q版表情包</p>
         </div>
 
         {/* 上传页面 */}
         {step === 'upload' && (
           <div className="bg-white rounded-2xl shadow-xl p-6">
             <div
-              {...getRootProps()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-                isDragActive ? 'border-primary bg-primary/5' : 'border-gray-300 hover:border-primary'
-              }`}
+              onClick={handleClick}
+              className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors border-gray-300 hover:border-yellow-500"
             >
-              <input {...getInputProps()} />
-              {previewUrl ? (
-                <Image
-                  src={previewUrl}
-                  alt="预览"
-                  width={256}
-                  height={256}
-                  className="max-h-64 mx-auto rounded-lg"
-                />
-              ) : (
-                <>
-                  <div className="text-5xl mb-4">📷</div>
-                  <p className="text-gray-600 font-medium">点击或拖拽上传照片</p>
-                  <p className="text-gray-400 text-sm mt-1">支持 JPG/PNG，不超过10MB</p>
-                </>
-              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <div className="text-5xl mb-4">📷</div>
+              <p className="text-gray-600 font-medium">点击或拖拽上传照片</p>
+              <p className="text-gray-400 text-sm mt-1">支持 JPG/PNG，不超过10MB</p>
             </div>
           </div>
         )}
@@ -243,26 +291,24 @@ export default function Home() {
         {step === 'preview' && (
           <div className="bg-white rounded-2xl shadow-xl p-6">
             <h2 className="text-xl font-bold text-center mb-4">确认照片</h2>
-            <Image
+            <img
               src={previewUrl}
               alt="预览"
-              width={256}
-              height={256}
               className="max-h-64 mx-auto rounded-lg mb-4"
             />
             <p className="text-gray-500 text-sm text-center mb-6">
-              将以此照片生成8张Q版表情包
+              将以此照片生成 3x3 网格表情包（9 个表情）
             </p>
             <div className="flex gap-3">
               <button
                 onClick={handleReset}
-                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium hover:bg-gray-200 transition-colors"
+                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-colors"
               >
                 重新选择
               </button>
               <button
                 onClick={handleGenerate}
-                className="flex-1 py-3 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+                className="flex-1 py-3 rounded-xl bg-yellow-500 text-white font-medium hover:bg-yellow-600 transition-colors"
               >
                 开始生成
               </button>
@@ -277,7 +323,7 @@ export default function Home() {
             <h2 className="text-xl font-bold mb-2">正在生成中...</h2>
             <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
               <div
-                className="bg-primary h-3 rounded-full transition-all duration-500"
+                className="bg-yellow-500 h-3 rounded-full transition-all duration-500"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -296,19 +342,17 @@ export default function Home() {
                 className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
                 onClick={() => setSelectedImage(null)}
               >
-                <Image
-                  src={results[selectedImage]}
+                <img
+                  src={splitImages[selectedImage]}
                   alt={EXPRESSIONS[selectedImage]?.name}
-                  width={400}
-                  height={400}
                   className="max-w-full max-h-full rounded-lg"
                 />
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleDownload(results[selectedImage], `avatar_${selectedImage + 1}.png`)
+                    handleDownload(splitImages[selectedImage], `avatar_${selectedImage + 1}.png`)
                   }}
-                  className="absolute bottom-8 py-2 px-4 bg-primary text-white rounded-lg font-medium"
+                  className="absolute bottom-8 py-2 px-4 bg-yellow-500 text-white rounded-lg font-medium"
                 >
                   下载
                 </button>
@@ -316,26 +360,25 @@ export default function Home() {
             )}
 
             {/* 网格展示 */}
-            <div className="grid grid-cols-4 gap-2 mb-4">
-              {results.map((url, i) => (
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {splitImages.map((url, i) => (
                 <div
                   key={i}
                   onClick={() => toggleSelect(i)}
                   className={`relative cursor-pointer rounded-lg overflow-hidden aspect-square ${
-                    selected.includes(i) ? 'ring-2 ring-primary' : ''
+                    selected.includes(i) ? 'ring-2 ring-yellow-500' : ''
                   }`}
                 >
-                  <Image
+                  <img
                     src={url}
                     alt={EXPRESSIONS[i]?.name || `表情${i + 1}`}
-                    fill
-                    className="object-cover"
+                    className="w-full h-full object-cover"
                   />
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs text-center py-1">
                     {EXPRESSIONS[i]?.emoji} {EXPRESSIONS[i]?.name}
                   </div>
                   {selected.includes(i) && (
-                    <div className="absolute top-1 right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                    <div className="absolute top-1 right-1 w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center">
                       <span className="text-white text-xs">✓</span>
                     </div>
                   )}
@@ -344,25 +387,25 @@ export default function Home() {
             </div>
 
             <div className="flex items-center justify-between mb-4">
-              <button onClick={toggleAll} className="text-primary text-sm font-medium">
-                {selected.length === results.length ? '取消全选' : '全选'}
+              <button onClick={toggleAll} className="text-yellow-600 text-sm font-medium">
+                {selected.length === splitImages.length ? '取消全选' : '全选'}
               </button>
               <p className="text-gray-500 text-sm">
-                已选择 {selected.length}/8 张
+                已选择 {selected.length}/9 张
               </p>
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={handleReset}
-                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium"
+                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-colors"
               >
                 再生成一张
               </button>
               <button
                 onClick={handleDownloadAll}
                 disabled={selected.length === 0}
-                className="flex-1 py-3 rounded-xl bg-primary text-white font-medium disabled:opacity-50"
+                className="flex-1 py-3 rounded-xl bg-yellow-500 text-white font-medium hover:bg-yellow-600 transition-colors disabled:opacity-50"
               >
                 下载全部
               </button>

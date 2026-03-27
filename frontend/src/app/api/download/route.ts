@@ -1,53 +1,59 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
-import archiver from 'archiver'
+import JSZip from 'jszip'
 
 export async function POST(request: NextRequest) {
   try {
-    const { urls } = await request.json()
+    const body = await request
+.json()
+    const { url, urls } = body
 
-    if (!urls || urls.length === 0) {
-      return NextResponse.json({ error: 'No URLs provided' }, { status: 400 })
+    // 单张图片下载
+    if (url && !urls
+) {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error('Failed to fetch image')
+      }
+      const blob = await response.blob()
+      
+      return new NextResponse(blob, {
+        headers: {
+          'Content-Type': 'image/png',
+          'Content-Disposition': 'attachment; filename="avatar.png"',
+        },
+      })
     }
 
-    // 创建 archive
-    const archive = archiver('zip', { zlib: { level: 9 } })
-
-    // 收集 archive 数据
-    const chunks: Uint8Array[] = []
-    archive.on('data', (chunk) => chunks.push(chunk))
-
-    await new Promise<void>((resolve, reject) => {
-      archive.on('end', resolve)
-      archive.on('error', reject)
-
+    // 批量打包下载（ZIP）
+    if (urls && Array.isArray(urls) && urls.length > 0) {
+      const zip = new JSZip()
+      
       for (let i = 0; i < urls.length; i++) {
-        const url = urls[i]
         try {
-          // 本地文件
-          if (url.startsWith('/uploads/')) {
-            const filePath = path.join(process.cwd(), 'public', url)
-            if (fs.existsSync(filePath)) {
-              archive.file(filePath, { name: `avatar_${i + 1}.png` })
-            }
+          const response = await fetch(urls[i])
+          if (response.ok) {
+            const blob = await response.blob()
+            const arrayBuffer = await blob.arrayBuffer()
+            const fileName = `avatar_${i + 1}.png`
+            zip.file(fileName, arrayBuffer)
           }
         } catch (e) {
-          console.error(`Failed to add ${url}:`, e)
+          console.error(`Failed to download image ${i}:`, e)
         }
       }
 
-      archive.finalize()
-    })
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      
+      return new NextResponse(zipBlob, {
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': 'attachment; filename="q-avatar.zip"',
+        },
+      })
+    }
 
-    const buffer = Buffer.concat(chunks)
-
-    return new NextResponse(buffer, {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename=q-avatar.zip',
-      },
-    })
+    return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
   } catch (err) {
     console.error('Download error:', err)
     return NextResponse.json({ error: 'Download failed' }, { status: 500 })
