@@ -4,14 +4,12 @@ on:
   push:
     branches: [master, clean-master, main]
 
-  # 允许手动触发
   workflow_dispatch:
 
 jobs:
   deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    timeout: 30 minutes
 
     steps:
       - name: Checkout code
@@ -32,9 +30,15 @@ jobs:
         working-directory: ./frontend
         run: npm run build
 
+      - name: Run @cloudflare/next-on-pages
+        working-directory: ./frontend
+        run: npx @cloudflare/next-on-pages
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=q-avatar-frontend
+          projectName: q-avatar-frontend
+          directory: frontend/.vercel/output/static
+          waitUntilFinished: true
