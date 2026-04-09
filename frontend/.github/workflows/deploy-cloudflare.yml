@@ -4,7 +4,6 @@ on:
   push:
     branches: [master, clean-master, main]
 
-  # 允许手动触发
   workflow_dispatch:
 
 jobs:
@@ -40,6 +39,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: q-avatar-frontend
+          projectName: q-avatar
           directory: frontend/.vercel/output/static
           waitUntilFinished: true
