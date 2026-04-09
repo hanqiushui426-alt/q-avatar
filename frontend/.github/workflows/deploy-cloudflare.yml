@@ -39,6 +39,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: q-avatar
-          directory: frontend/.vercel/output/static
-          waitUntilFinished: true
+          command: pages project deploy q-avatar --directory=frontend/.vercel/output/static
