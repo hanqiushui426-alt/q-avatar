@@ -34,7 +34,7 @@ jobs:
         working-directory: ./frontend
         run: npx @cloudflare/next-on-pages
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy to Cloudflare Pages via API
         run: |
           # Upload the static files to Cloudflare Pages
           response=$(curl -s -X POST \
