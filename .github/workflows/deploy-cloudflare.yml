@@ -39,6 +39,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: |
-            npx wrangler pages deploy frontend/.vercel/output/static --project-name q-avatar-frontend
-            npx wrangler pages domain add thepeacock.shop --project-name q-avatar-frontend
+          preCommands: npx wrangler pages deploy frontend/.vercel/output/static --project-name q-avatar-frontend
+          postCommands: npx wrangler pages domain add thepeacock.shop --project-name q-avatar-frontend
