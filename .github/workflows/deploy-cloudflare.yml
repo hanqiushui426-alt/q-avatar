@@ -39,5 +39,17 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          preCommands: npx wrangler pages deploy frontend/.vercel/output/static --project-name q-avatar-frontend
-          postCommands: npx wrangler pages domain add thepeacock.shop --project-name q-avatar-frontend
+          preCommands: wrangler pages deploy frontend/.vercel/output/static --project-name q-avatar-frontend
+
+      - name: Wait for deployment
+        run: sleep 10
+
+      - name: Add custom domain via API
+        if: success()
+        run: |
+          echo "Adding custom domain thepeacock.shop..."
+          curl -s -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/q-avatar-frontend/domains" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"hostname":"thepeacock.shop"}' || echo "Domain may already exist or needs manual setup"
