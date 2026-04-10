@@ -35,8 +35,8 @@ jobs:
         run: npx @cloudflare/next-on-pages
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/next-on-pages@v4
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: q-avatar-frontend
+          command: pages deploy frontend/.vercel/output/static --project-name q-avatar-frontend
