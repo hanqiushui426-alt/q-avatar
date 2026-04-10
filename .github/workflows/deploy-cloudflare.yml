@@ -35,10 +35,8 @@ jobs:
         run: npx @cloudflare/next-on-pages
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/next-on-pages@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: q-avatar-frontend
-          directory: frontend/.vercel/output/static
-          waitUntilFinished: true
